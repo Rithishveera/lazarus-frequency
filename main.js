@@ -92,6 +92,10 @@ function getWorldPalette(t) {
   return result;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 // --- Game states ------------------------------------------------------------
 
 const GameState = {
@@ -491,7 +495,9 @@ const player = {
   y: 0,
   scale: 1.2,
   facingRight: true,
-  speed: 3
+  speed: 3,
+  stamina: 100,
+  vx: 0
 };
 
 // --- State implementations ---------------------------------------------------
@@ -582,13 +588,25 @@ states[GameState.CRACK_SEQUENCE] = {
   }
 };
 
+const runBuildings = [
+  { worldX: 300, width: 200, height: 280 },
+  { worldX: 700, width: 180, height: 220 },
+  { worldX: 1200, width: 240, height: 300 },
+  { worldX: 1800, width: 160, height: 200 },
+  { worldX: 2400, width: 220, height: 260 },
+  { worldX: 3200, width: 200, height: 240 },
+  { worldX: 3800, width: 180, height: 280 }
+];
+
 states[GameState.FORCED_RUN] = {
   init() {
-    this.startX = player.x;
+    player.stamina = 100;
+    player.x += 200;
+    player.facingRight = true;
     playSprintTexture();
   },
   update() {
-    player.x += 8;
+    player.x += 400 * (frameDt / 1000);
     updateCamera(player.x);
     if (stateTime >= 2000) {
       stopSprintTexture();
@@ -596,43 +614,127 @@ states[GameState.FORCED_RUN] = {
     }
   },
   render() {
-    const palette = PALETTE.WORLDB;
+    const progress = clamp(player.x / 4000, 0, 1);
+    const palette = getWorldPalette(progress);
     drawSky(palette);
     drawGround(palette);
     drawCharacter(player.x - camera.x, player.y, palette, player.scale, true);
     drawTimer(stateTime / 1000);
+    runBuildings.forEach(b => {
+      const sx = b.worldX - camera.x;
+      if (sx + b.width > 0 && sx < canvas.width) {
+        drawBuilding(sx, b.width, b.height, palette);
+      }
+    });
     drawWorldLabel('RUNNING', palette.text);
   }
 };
 
 states[GameState.RUN_PLAYER] = {
-  init() {},
+  init() {
+    this.stillTime = 0;
+    this.progress = 0;
+  },
   update() {
-    let dx = 0;
-    if (isMovingLeft()) dx -= player.speed;
-    if (isMovingRight()) dx += player.speed;
-    player.x += dx;
+    const walkSpeed = 120;
+    const sprintSpeed = 320;
+    const backSpeed = 60;
+    const staminaDrain = 25;
+    const staminaRegen = 15;
+    const dtSec = frameDt / 1000;
+
+    let currentSpeed = 0;
+
+    if (isMovingRight()) {
+      player.facingRight = true;
+      if (isSprinting() && player.stamina > 0) {
+        currentSpeed = sprintSpeed;
+        player.stamina = Math.max(0, player.stamina - staminaDrain * dtSec);
+      } else {
+        currentSpeed = walkSpeed;
+        player.stamina = Math.min(100, player.stamina + staminaRegen * dtSec);
+      }
+    } else if (isMovingLeft()) {
+      currentSpeed = -backSpeed;
+      player.facingRight = false;
+      player.stamina = Math.min(100, player.stamina + staminaRegen * dtSec);
+    } else {
+      player.stamina = Math.min(100, player.stamina + staminaRegen * dtSec);
+    }
+
+    if (currentSpeed === 0) {
+      this.stillTime += frameDt;
+      if (this.stillTime >= 2000) {
+        transition(GameState.RUN_DEAD);
+        return;
+      }
+    } else {
+      this.stillTime = 0;
+    }
+
+    player.vx = currentSpeed;
+    player.x += currentSpeed * dtSec;
     updateCamera(player.x);
+
+    this.progress = clamp(player.x / 4000, 0, 1);
+
+    if (player.x >= 4000) {
+      transition(GameState.KITCHEN_SILENCE);
+    }
   },
   render() {
-    const palette = PALETTE.WORLDB;
+    const progress = this.progress || 0;
+    const palette = getWorldPalette(progress);
     drawSky(palette);
     drawGround(palette);
     drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
+    runBuildings.forEach(b => {
+      const sx = b.worldX - camera.x;
+      if (sx + b.width > 0 && sx < canvas.width) {
+        drawBuilding(sx, b.width, b.height, palette);
+      }
+    });
     drawWorldLabel('RUNNING // CONTROLLED', palette.text);
+  }
+};
+
+states[GameState.RUN_DEAD] = {
+  init() {
+    player.x -= 150;
+    player.vx = 0;
+  },
+  update() {
+    if (stateTime >= 1000) {
+      transition(GameState.RUN_PLAYER);
+    }
+  },
+  render() {
+    const progress = clamp(player.x / 4000, 0, 1);
+    const palette = getWorldPalette(progress);
+    drawSky(palette);
+    drawGround(palette);
+    runBuildings.forEach(b => {
+      const sx = b.worldX - camera.x;
+      if (sx + b.width > 0 && sx < canvas.width) {
+        drawBuilding(sx, b.width, b.height, palette);
+      }
+    });
+    drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
+    drawWorldLabel('DEAD // RESET', palette.text);
   }
 };
 
 // --- Main loop ----------------------------------------------------------------
 
 let lastTime = performance.now();
+let frameDt = 0;
 
 function loop() {
   const now = performance.now();
-  const dt = now - lastTime;
+  frameDt = Math.min(now - lastTime, 100);
   lastTime = now;
   
-  stateTime += dt;
+  stateTime += frameDt;
   
   const current = states[currentState];
   if (current) {
