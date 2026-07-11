@@ -484,33 +484,168 @@ function drawFlash(colour) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-// --- Temporary test render ---------------------------------------------------
-// Remove this block once you confirm the test scene looks correct.
+// --- Player ------------------------------------------------------------------
 
-function renderTest() {
-  const palette = PALETTE.NORMAL;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawSky(palette);
-  drawGround(palette);
-  drawBuilding(canvas.width * 0.2, canvas.width * 0.25, canvas.height * 0.35, palette);
-  drawCharacter(canvas.width * 0.6, canvas.height * 0.6, palette, 1.2, true);
-  drawTimer(secondsSinceLoad());
-  drawWorldLabel('LAZARUS // FREQUENCY', palette.text);
-}
+const player = {
+  x: 0,
+  y: 0,
+  scale: 1.2,
+  facingRight: true,
+  speed: 3
+};
 
-function secondsSinceLoad() {
-  return (performance.now() - loadStart) / 1000;
-}
+// --- State implementations ---------------------------------------------------
 
-let loadStart = performance.now();
+states[GameState.CANTEEN_FREE] = {
+  init() {
+    player.x = canvas.width * 0.3;
+    player.y = canvas.height * 0.6;
+    player.facingRight = true;
+    resetCamera(player.x);
+    playCanteenAmbient();
+  },
+  update() {
+    let dx = 0;
+    if (isMovingLeft()) dx -= player.speed;
+    if (isMovingRight()) dx += player.speed;
+    player.x += dx;
+    updateCamera(player.x);
+    if (stateTime >= 15000) {
+      transition(GameState.CANTEEN_FREEZE);
+    }
+  },
+  render() {
+    const palette = PALETTE.NORMAL;
+    drawSky(palette);
+    drawGround(palette);
+    drawBuilding(canvas.width * 0.2, canvas.width * 0.25, canvas.height * 0.35, palette);
+    drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
+    drawTimer(stateTime / 1000);
+    drawWorldLabel('CANTEEN // FREE', palette.text);
+  }
+};
+
+states[GameState.CANTEEN_FREEZE] = {
+  init() {
+    stopCanteenAmbient();
+  },
+  update() {
+    if (stateTime >= 2000) {
+      transition(GameState.CRACK_SEQUENCE);
+    }
+  },
+  render() {
+    const palette = PALETTE.NORMAL;
+    drawSky(palette);
+    drawGround(palette);
+    drawBuilding(canvas.width * 0.2, canvas.width * 0.25, canvas.height * 0.35, palette);
+    drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
+  }
+};
+
+states[GameState.CRACK_SEQUENCE] = {
+  init() {
+    stopCanteenAmbient();
+    this.flashDone = false;
+    this.figureFacing = true;
+    this.turned = false;
+  },
+  update() {
+    if (stateTime >= 5000) {
+      transition(GameState.FORCED_RUN);
+    }
+  },
+  render() {
+    const palette = PALETTE.WORLDB;
+    
+    if (!this.flashDone && stateTime >= 500) {
+      this.flashDone = true;
+      drawFlash(palette.ground);
+      return;
+    }
+    
+    drawSky(palette);
+    drawGround(palette);
+    
+    if (stateTime >= 500 && stateTime < 3000) {
+      drawCharacter(player.x - camera.x, player.y, palette, player.scale, this.figureFacing);
+    }
+    
+    if (stateTime >= 3000 && !this.turned) {
+      this.turned = true;
+      this.figureFacing = false;
+    }
+    
+    if (stateTime >= 3000 && stateTime < 4000) {
+      drawCharacter(player.x - camera.x, player.y, palette, player.scale, this.figureFacing);
+    }
+  }
+};
+
+states[GameState.FORCED_RUN] = {
+  init() {
+    this.startX = player.x;
+    playSprintTexture();
+  },
+  update() {
+    player.x += 8;
+    updateCamera(player.x);
+    if (stateTime >= 2000) {
+      stopSprintTexture();
+      transition(GameState.RUN_PLAYER);
+    }
+  },
+  render() {
+    const palette = PALETTE.WORLDB;
+    drawSky(palette);
+    drawGround(palette);
+    drawCharacter(player.x - camera.x, player.y, palette, player.scale, true);
+    drawTimer(stateTime / 1000);
+    drawWorldLabel('RUNNING', palette.text);
+  }
+};
+
+states[GameState.RUN_PLAYER] = {
+  init() {},
+  update() {
+    let dx = 0;
+    if (isMovingLeft()) dx -= player.speed;
+    if (isMovingRight()) dx += player.speed;
+    player.x += dx;
+    updateCamera(player.x);
+  },
+  render() {
+    const palette = PALETTE.WORLDB;
+    drawSky(palette);
+    drawGround(palette);
+    drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
+    drawWorldLabel('RUNNING // CONTROLLED', palette.text);
+  }
+};
+
+// --- Main loop ----------------------------------------------------------------
+
+let lastTime = performance.now();
 
 function loop() {
-  renderTest();
+  const now = performance.now();
+  const dt = now - lastTime;
+  lastTime = now;
+  
+  stateTime += dt;
+  
+  const current = states[currentState];
+  if (current) {
+    if (typeof current.update === 'function') current.update();
+    if (typeof current.render === 'function') current.render();
+  }
+  
   requestAnimationFrame(loop);
 }
 
 window.addEventListener('resize', resize);
 window.addEventListener('load', () => {
   resize();
+  transition(GameState.CANTEEN_FREE);
   requestAnimationFrame(loop);
 });
