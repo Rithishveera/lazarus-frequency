@@ -485,7 +485,7 @@ function drawWorldLabel(text, colour) {
 
 function drawFlash(colour) {
   ctx.fillStyle = colour;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(-20, -20, canvas.width + 40, canvas.height + 40);
 }
 
 // --- Player ------------------------------------------------------------------
@@ -499,6 +499,133 @@ const player = {
   stamina: 100,
   vx: 0
 };
+
+// --- Run constants & obstacles -----------------------------------------------
+
+const runStartX = 0;
+const runEndX = 4000;
+const PLAYER_HALF_W = 18;
+const PLAYER_TOP = 90;
+
+let shakeTime = 0;
+let shakeDuration = 0;
+
+function triggerShake(ms) {
+  shakeTime = ms;
+  shakeDuration = ms;
+}
+
+const runObstacles = [
+  { type: 'GROUND_CRACK', worldX: runStartX + 400, width: 80, height: 4, hit: false },
+  { type: 'FROZEN_PERSON', worldX: runStartX + 1500, width: 36, height: 90, hit: false },
+  { type: 'WORLD_FLASH', worldX: runStartX + 3200, triggered: false, flashFrame: false }
+];
+
+function resetRunObstacles() {
+  runObstacles.forEach(o => {
+    o.hit = false;
+    o.triggered = false;
+    o.flashFrame = false;
+  });
+}
+
+function playerRect() {
+  return { x: player.x - PLAYER_HALF_W, y: player.y - PLAYER_TOP, w: PLAYER_HALF_W * 2, h: PLAYER_TOP };
+}
+
+function obstacleRect(obs) {
+  if (obs.type === 'GROUND_CRACK' || obs.type === 'FROZEN_PERSON') {
+    return { x: obs.worldX - obs.width / 2, y: player.y - obs.height, w: obs.width, h: obs.height };
+  }
+  return null;
+}
+
+function aabbOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function updateObstacles() {
+  runObstacles.forEach(obs => {
+    if (obs.type === 'WORLD_FLASH') {
+      if (!obs.triggered && player.x >= obs.worldX) {
+        obs.triggered = true;
+        obs.flashFrame = true;
+      }
+      return;
+    }
+    if (obs.hit) return;
+    const o = obstacleRect(obs);
+    if (o && aabbOverlap(playerRect(), o)) {
+      obs.hit = true;
+      triggerShake(200);
+    }
+  });
+}
+
+function drawFrozenPerson(x, y, palette, scale) {
+  const headR = 12 * scale;
+  const bodyLen = 40 * scale;
+  const upperLen = 20 * scale;
+  const lowerLen = 20 * scale;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(0.25);
+  ctx.strokeStyle = palette.skin;
+  ctx.lineWidth = 4 * scale;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(0, -headR - bodyLen, headR, 0, Math.PI * 2);
+  ctx.fillStyle = palette.skin;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0, -headR - bodyLen, headR + 4 * scale, Math.PI, 0);
+  ctx.strokeStyle = palette.hair;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -headR - bodyLen + headR);
+  ctx.lineTo(0, 0);
+  ctx.strokeStyle = palette.skin;
+  ctx.stroke();
+  const sy = -headR - bodyLen + headR * 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, sy);
+  ctx.lineTo(-upperLen * 1.3, sy + upperLen * 0.7);
+  ctx.lineTo(-upperLen * 1.3 - lowerLen * 0.6, sy + upperLen * 0.7 + lowerLen * 1.1);
+  ctx.moveTo(0, sy);
+  ctx.lineTo(upperLen * 0.6, sy + upperLen * 1.3);
+  ctx.lineTo(upperLen * 0.6 + lowerLen * 0.4, sy + upperLen * 1.3 + lowerLen * 0.9);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-upperLen * 0.4, upperLen * 1.2);
+  ctx.lineTo(-upperLen * 0.2, upperLen * 1.2 + lowerLen * 1.3);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(upperLen * 1.3, upperLen * 0.6);
+  ctx.lineTo(upperLen * 1.5, upperLen * 0.6 + lowerLen * 1.0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawObstacles(palette) {
+  const groundY = canvas.height * 0.6;
+  runObstacles.forEach(obs => {
+    const sx = obs.worldX - camera.x;
+    if (obs.type === 'GROUND_CRACK' && !obs.hit) {
+      const grad = ctx.createLinearGradient(0, groundY - 24, 0, groundY);
+      grad.addColorStop(0, 'rgba(181,69,27,0)');
+      grad.addColorStop(1, palette.amber);
+      ctx.fillStyle = grad;
+      ctx.fillRect(sx - obs.width / 2, groundY - 24, obs.width, 24);
+      ctx.fillStyle = palette.amber;
+      ctx.fillRect(sx - obs.width / 2, groundY - 4, obs.width, 4);
+    } else if (obs.type === 'FROZEN_PERSON') {
+      drawFrozenPerson(sx, groundY, palette, player.scale);
+    } else if (obs.type === 'WORLD_FLASH' && obs.flashFrame) {
+      drawFlash(PALETTE.WORLDB.ground);
+      obs.flashFrame = false;
+    }
+  });
+}
 
 // --- State implementations ---------------------------------------------------
 
@@ -603,18 +730,20 @@ states[GameState.FORCED_RUN] = {
     player.stamina = 100;
     player.x += 200;
     player.facingRight = true;
+    resetRunObstacles();
     playSprintTexture();
   },
   update() {
     player.x += 400 * (frameDt / 1000);
     updateCamera(player.x);
+    updateObstacles();
     if (stateTime >= 2000) {
       stopSprintTexture();
       transition(GameState.RUN_PLAYER);
     }
   },
   render() {
-    const progress = clamp(player.x / 4000, 0, 1);
+    const progress = clamp(player.x / runEndX, 0, 1);
     const palette = getWorldPalette(progress);
     drawSky(palette);
     drawGround(palette);
@@ -626,6 +755,7 @@ states[GameState.FORCED_RUN] = {
         drawBuilding(sx, b.width, b.height, palette);
       }
     });
+    drawObstacles(palette);
     drawWorldLabel('RUNNING', palette.text);
   }
 };
@@ -675,10 +805,11 @@ states[GameState.RUN_PLAYER] = {
     player.vx = currentSpeed;
     player.x += currentSpeed * dtSec;
     updateCamera(player.x);
+    updateObstacles();
 
-    this.progress = clamp(player.x / 4000, 0, 1);
+    this.progress = clamp(player.x / runEndX, 0, 1);
 
-    if (player.x >= 4000) {
+    if (player.x >= runEndX) {
       transition(GameState.KITCHEN_SILENCE);
     }
   },
@@ -694,6 +825,7 @@ states[GameState.RUN_PLAYER] = {
         drawBuilding(sx, b.width, b.height, palette);
       }
     });
+    drawObstacles(palette);
     drawWorldLabel('RUNNING // CONTROLLED', palette.text);
   }
 };
@@ -709,7 +841,7 @@ states[GameState.RUN_DEAD] = {
     }
   },
   render() {
-    const progress = clamp(player.x / 4000, 0, 1);
+    const progress = clamp(player.x / runEndX, 0, 1);
     const palette = getWorldPalette(progress);
     drawSky(palette);
     drawGround(palette);
@@ -719,6 +851,7 @@ states[GameState.RUN_DEAD] = {
         drawBuilding(sx, b.width, b.height, palette);
       }
     });
+    drawObstacles(palette);
     drawCharacter(player.x - camera.x, player.y, palette, player.scale, player.facingRight);
     drawWorldLabel('DEAD // RESET', palette.text);
   }
@@ -737,9 +870,18 @@ function loop() {
   stateTime += frameDt;
   
   const current = states[currentState];
-  if (current) {
-    if (typeof current.update === 'function') current.update();
-    if (typeof current.render === 'function') current.render();
+  if (current && typeof current.update === 'function') current.update();
+
+  if (shakeTime > 0) {
+    ctx.save();
+    const amt = (shakeTime / shakeDuration) * 6;
+    ctx.translate((Math.random() - 0.5) * amt, (Math.random() - 0.5) * amt);
+  }
+  if (current && typeof current.render === 'function') current.render();
+  if (shakeTime > 0) {
+    ctx.restore();
+    shakeTime -= frameDt;
+    if (shakeTime < 0) shakeTime = 0;
   }
   
   requestAnimationFrame(loop);
