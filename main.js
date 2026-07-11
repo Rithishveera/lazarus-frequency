@@ -126,6 +126,203 @@ function transition(newState) {
   }
 }
 
+// --- Audio Engine -----------------------------------------------------------
+
+let audioCtx = null;
+let masterGain = null;
+let threadOsc = null;
+let threadGain = null;
+let canteenNodes = [];
+let canteenNoise = null;
+let sprintNodes = [];
+let sprintIntervalId = null;
+let celloOsc = null;
+let celloGain = null;
+let celloFilter = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.7;
+  const compressor = audioCtx.createDynamicsCompressor();
+  masterGain.connect(compressor);
+  compressor.connect(audioCtx.destination);
+  threadOsc = audioCtx.createOscillator();
+  threadOsc.type = 'sine';
+  threadOsc.frequency.value = 261.63;
+  threadGain = audioCtx.createGain();
+  threadGain.gain.value = 0;
+  threadOsc.connect(threadGain);
+  threadGain.connect(masterGain);
+  threadOsc.start();
+}
+
+function resumeAudio() {
+  if (!audioCtx) initAudio();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function fadeTo(gainNode, targetVolume, seconds) {
+  if (!audioCtx || !gainNode) return;
+  const now = audioCtx.currentTime;
+  gainNode.gain.cancelScheduledValues(now);
+  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+  gainNode.gain.linearRampToValueAtTime(targetVolume, now + seconds);
+}
+
+function setThreadVolume(volume, rampSeconds) {
+  resumeAudio();
+  if (!threadGain) return;
+  fadeTo(threadGain, volume, rampSeconds);
+}
+
+function playCanteenAmbient() {
+  resumeAudio();
+  stopCanteenAmbient();
+  const now = audioCtx.currentTime;
+  [
+    { type: 'sine', freq: 110, gain: 0.03 },
+    { type: 'triangle', freq: 112, gain: 0.02 },
+    { type: 'sine', freq: 115, gain: 0.02 }
+  ].forEach(layer => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = layer.type;
+    osc.frequency.value = layer.freq;
+    gain.gain.value = layer.gain;
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(now);
+    canteenNodes.push({ osc, gain });
+  });
+  const bufferSize = audioCtx.sampleRate * 2;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buffer;
+  noise.loop = true;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 800;
+  canteenNoise = noise;
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0.01;
+  noise.connect(filter);
+  filter.connect(noiseGain);
+  noiseGain.connect(masterGain);
+  noise.start(now);
+}
+
+function stopCanteenAmbient() {
+  canteenNodes.forEach(node => {
+    try { fadeTo(node.gain, 0, 0.5); } catch (e) {}
+    setTimeout(() => { try { node.osc.stop(); } catch (e) {} }, 600);
+  });
+  canteenNodes = [];
+  if (canteenNoise) {
+    try { canteenNoise.stop(); } catch (e) {}
+    canteenNoise = null;
+  }
+}
+
+function playSprintTexture() {
+  resumeAudio();
+  stopSprintTexture();
+  const now = audioCtx.currentTime;
+  const drone = audioCtx.createOscillator();
+  drone.type = 'sawtooth';
+  drone.frequency.value = 73;
+  const droneFilter = audioCtx.createBiquadFilter();
+  droneFilter.type = 'lowpass';
+  droneFilter.frequency.value = 200;
+  const droneGain = audioCtx.createGain();
+  droneGain.gain.value = 0.08;
+  drone.connect(droneFilter);
+  droneFilter.connect(droneGain);
+  droneGain.connect(masterGain);
+  drone.start(now);
+  const pulseGain = audioCtx.createGain();
+  pulseGain.gain.value = 0;
+  pulseGain.connect(masterGain);
+  sprintNodes = [{ osc: drone, gain: droneGain, filter: droneFilter, pulseGain }];
+  const interval = 60000 / 130;
+  sprintIntervalId = setInterval(() => {
+    if (!sprintNodes.length) return;
+    const pg = sprintNodes[0].pulseGain;
+    const t = audioCtx.currentTime;
+    pg.gain.cancelScheduledValues(t);
+    pg.gain.setValueAtTime(0.15, t);
+    pg.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+  }, interval);
+}
+
+function stopSprintTexture() {
+  if (sprintIntervalId) {
+    clearInterval(sprintIntervalId);
+    sprintIntervalId = null;
+  }
+  sprintNodes.forEach(node => {
+    try { node.osc.stop(); } catch (e) {}
+    try { node.osc.disconnect(); } catch (e) {}
+    try { node.gain.disconnect(); } catch (e) {}
+    try { node.filter.disconnect(); } catch (e) {}
+    try { node.pulseGain.disconnect(); } catch (e) {}
+  });
+  sprintNodes = [];
+}
+
+function playCelloNote() {
+  resumeAudio();
+  stopCelloNoteAbrupt();
+  const now = audioCtx.currentTime;
+  celloOsc = audioCtx.createOscillator();
+  celloOsc.type = 'sine';
+  celloOsc.frequency.value = 146.83;
+  celloFilter = audioCtx.createBiquadFilter();
+  celloFilter.type = 'lowpass';
+  celloFilter.frequency.value = 400;
+  celloGain = audioCtx.createGain();
+  celloGain.gain.setValueAtTime(0, now);
+  celloGain.gain.linearRampToValueAtTime(0.12, now + 1.5);
+  celloOsc.connect(celloFilter);
+  celloFilter.connect(celloGain);
+  celloGain.connect(masterGain);
+  celloOsc.start(now);
+}
+
+function stopCelloNoteAbrupt() {
+  if (!celloOsc) return;
+  const now = audioCtx.currentTime;
+  try { celloGain.gain.setValueAtTime(0, now); } catch (e) {}
+  try { celloOsc.stop(now + 0.01); } catch (e) {}
+  celloOsc = null;
+  celloGain = null;
+  celloFilter = null;
+}
+
+function killAllAudio() {
+  stopCanteenAmbient();
+  stopSprintTexture();
+  stopCelloNoteAbrupt();
+  if (threadGain) fadeTo(threadGain, 0, 0.1);
+}
+
+function setupAudioResume() {
+  const resume = () => {
+    resumeAudio();
+    document.removeEventListener('click', resume);
+    document.removeEventListener('keydown', resume);
+  };
+  document.addEventListener('click', resume);
+  document.addEventListener('keydown', resume);
+}
+
+setupAudioResume();
+
 // --- Draw functions ----------------------------------------------------------
 
 function drawSky(palette) {
