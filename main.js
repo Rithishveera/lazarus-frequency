@@ -323,6 +323,47 @@ function setupAudioResume() {
 
 setupAudioResume();
 
+// --- Input -------------------------------------------------------------------
+
+const keys = {};
+
+function onKeyDown(e) {
+  keys[e.code] = true;
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+    e.preventDefault();
+  }
+}
+
+function onKeyUp(e) {
+  keys[e.code] = false;
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+    e.preventDefault();
+  }
+}
+
+function isSprinting() { return !!keys['ShiftLeft'] || !!keys['ShiftRight']; }
+function isMovingLeft() { return !!keys['ArrowLeft'] || !!keys['KeyA']; }
+function isMovingRight() { return !!keys['ArrowRight'] || !!keys['KeyD']; }
+function isGripping() { return !!keys['Space']; }
+
+document.addEventListener('keydown', onKeyDown);
+document.addEventListener('keyup', onKeyUp);
+
+// --- Camera ------------------------------------------------------------------
+
+const camera = { x: 0, targetX: 0, smoothing: 0.1 };
+
+function updateCamera(targetX) {
+  camera.targetX = targetX;
+  const dest = targetX - canvas.width * 0.3;
+  camera.x += (dest - camera.x) * camera.smoothing;
+}
+
+function resetCamera(x) {
+  camera.x = x;
+  camera.targetX = x;
+}
+
 // --- Draw functions ----------------------------------------------------------
 
 function drawSky(palette) {
