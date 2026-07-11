@@ -125,3 +125,154 @@ function transition(newState) {
     states[newState].init();
   }
 }
+
+// --- Draw functions ----------------------------------------------------------
+
+function drawSky(palette) {
+  const halfH = canvas.height * 0.6;
+  const grad = ctx.createLinearGradient(0, 0, 0, halfH);
+  grad.addColorStop(0, palette.sky);
+  grad.addColorStop(1, palette.skyHorizon);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, halfH);
+}
+
+function drawGround(palette) {
+  const y = canvas.height * 0.6;
+  ctx.fillStyle = palette.ground;
+  ctx.fillRect(0, y, canvas.width, canvas.height - y);
+}
+
+function drawBuilding(x, width, height, palette) {
+  const groundY = canvas.height * 0.6;
+  const y = groundY - height;
+  ctx.fillStyle = palette.building;
+  ctx.fillRect(x, y, width, height);
+  ctx.fillStyle = palette.buildingDark;
+  ctx.fillRect(x + width * 0.7, y, width * 0.3, height);
+  const winCols = Math.floor(width / 20);
+  const winRows = Math.floor(height / 30);
+  const winW = 10;
+  const winH = 16;
+  ctx.fillStyle = palette.interior;
+  for (let r = 0; r < winRows; r++) {
+    for (let c = 0; c < winCols; c++) {
+      if ((r + c) % 2 === 0) {
+        const wx = x + 8 + c * 20;
+        const wy = y + 10 + r * 30;
+        if (wx + winW < x + width * 0.7) {
+          ctx.fillRect(wx, wy, winW, winH);
+        }
+      }
+    }
+  }
+}
+
+function drawCharacter(x, y, palette, scale, facingRight) {
+  const headR = 12 * scale;
+  const bodyLen = 40 * scale;
+  const upperLen = 20 * scale;
+  const lowerLen = 20 * scale;
+  ctx.save();
+  if (!facingRight) {
+    ctx.translate(x * 2, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.strokeStyle = palette.skin;
+  ctx.lineWidth = 4 * scale;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(x, y - headR - bodyLen, headR, 0, Math.PI * 2);
+  ctx.fillStyle = palette.skin;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x, y - headR - bodyLen, headR + 4 * scale, Math.PI, 0);
+  ctx.strokeStyle = palette.hair;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y - headR - bodyLen + headR);
+  ctx.lineTo(x, y);
+  ctx.strokeStyle = palette.skin;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y - headR - bodyLen + headR * 1.5);
+  ctx.lineTo(x - upperLen, y - headR - bodyLen + headR * 1.5 + upperLen);
+  ctx.lineTo(x - upperLen - lowerLen * 0.5, y - headR - bodyLen + headR * 1.5 + upperLen + lowerLen);
+  ctx.moveTo(x, y - headR - bodyLen + headR * 1.5);
+  ctx.lineTo(x + upperLen, y - headR - bodyLen + headR * 1.5 + upperLen);
+  ctx.lineTo(x + upperLen + lowerLen * 0.5, y - headR - bodyLen + headR * 1.5 + upperLen + lowerLen);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - upperLen * 0.8, y + upperLen);
+  ctx.lineTo(x - upperLen * 1.2, y + upperLen + lowerLen);
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + upperLen * 0.8, y + upperLen);
+  ctx.lineTo(x + upperLen * 1.2, y + upperLen + lowerLen);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAmberLight(x, y, radius, opacity) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const grad = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius);
+  grad.addColorStop(0, `rgba(212,168,67,${opacity})`);
+  grad.addColorStop(0.5, `rgba(181,69,27,${opacity * 0.2})`);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  ctx.restore();
+}
+
+function drawTimer(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  ctx.font = '24px "Share Tech Mono"';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${m}:${s}`, canvas.width - 20, canvas.height - 20);
+}
+
+function drawWorldLabel(text, colour) {
+  ctx.font = '12px "Share Tech Mono"';
+  ctx.fillStyle = colour;
+  ctx.textAlign = 'left';
+  ctx.fillText(text, 20, canvas.height - 20);
+}
+
+function drawFlash(colour) {
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// --- Temporary test render ---------------------------------------------------
+// Remove this block once you confirm the test scene looks correct.
+
+function renderTest() {
+  const palette = PALETTE.NORMAL;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawSky(palette);
+  drawGround(palette);
+  drawBuilding(canvas.width * 0.2, canvas.width * 0.25, canvas.height * 0.35, palette);
+  drawCharacter(canvas.width * 0.6, canvas.height * 0.6, palette, 1.2, true);
+  drawTimer(secondsSinceLoad());
+  drawWorldLabel('LAZARUS // FREQUENCY', palette.text);
+}
+
+function secondsSinceLoad() {
+  return (performance.now() - loadStart) / 1000;
+}
+
+let loadStart = performance.now();
+
+function loop() {
+  renderTest();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', resize);
+window.addEventListener('load', () => {
+  resize();
+  requestAnimationFrame(loop);
+});
